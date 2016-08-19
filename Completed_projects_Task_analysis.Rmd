@@ -1,0 +1,446 @@
+
+---
+title: '**Task Level analysis for Sunrun Completed projects**'
+output:
+  html_document:
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_depth: 2
+  pdf_document:
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+  word_document: default
+---
+
+```{r,  echo  =  FALSE,  results  =  'hide',  message  =  FALSE,  warning  =  FALSE}
+#loading the libraries
+library(plyr)  ;  library(sqldf)  ;  library(ggplot2)  ;  library(tcltk2)
+library(lubridate)  ;  library(bizdays)  ;  library(plotly)  ;  library(ade4)
+library(reshape2)  ;  library(rCharts)  ;  library(clickme)  ;  library(knitr) #The package
+setwd("~/Desktop/courses/PAST/Practicum1/Datasets/Sunrun/")
+#laoding the datasets
+Project_milestone  <-  read.csv("WFM_Project_Milestone_Dates.csv")  
+Project_Attributes  <-  read.csv("Project_Attributes copy.csv")
+Project_Attributes  <-  Project_Attributes[  ,  -c(15:16)]
+#---------------------#--------------------#---------------------#---------------------
+#-----------------#  Preparing the dataset #---------------------#---------------------
+#---------------------#--------------------#---------------------#---------------------
+#Creating aliases
+PM  <-  Project_milestone  ;  PA  <-  Project_Attributes  
+rm(Project_Attributes,  Project_milestone)
+#removing duplicates from both the dataset
+PM  <-  PM[!duplicated(PM$Project.Name), ]  ;  PA  <-  PA[!duplicated(PA$Project.Name), ]   
+#changing to suitable names
+names(PA)  <-  c("Project.Name","Status","Purchased.through","Contract.type",
+"Install.Branch","Utility","jurisdiction","Muncipality","System.size","If_build",
+"if_MPU","If_Re_roof","If_HOA","If_PEStamp")
+#Completion dates data
+WC  <-  read.csv("WFM_Completion_Dates.csv")
+attach(WC)  
+data  <-  WC[,c("Phase.Name",  "Workflow.Task.Name")]
+names(data)  <-  c("Phase",  "Task")  ;  detach(WC)
+#aggregating the bad.data to clean it
+data.1  <-  sqldf("select Task,  Phase,  count(*) cnt from data group by Task,  Phase")
+data.2  <-  data.1[order(-data.1$cnt),  ]#descending order, Task
+#removing misclassified tasks out
+data.3  <-  data.2[!duplicated(data.2$Task), ]  
+#removing "Tasks" with too little counts (less than equal to 500 steps)
+data.4  <-  data.3[data.3$cnt  >  500,  ]
+data.4  <-  data.4[,  -3]
+#total counts lost as percentage
+sum(data.3$cnt[data.3$cnt  <=  500])  *  100 /  sum(data.3$cnt) #4.2% thats okay
+#mapping the resulatant to the original dataset
+names(WC)[2 : 3]  <-  c("old.Phase",  "Task")
+#join using the "plyr" package
+good.WC   <-  join(WC,  data.4,  by = "Task",  type  =  "inner",  match  =  "all")
+#Using the correct phase information
+good.WC  <-  good.WC[  ,  -c(2,  6)]
+#Correcting column names
+good.WC$Phase  <-  as.character(good.WC$Phase)
+good.WC$Phase[good.WC$Phase  ==  "Project Initiation"]  <-  "1. Initiation"
+good.WC$Phase[good.WC$Phase  ==  "Site Audit"]  <-  "2. Audit"
+good.WC$Phase[good.WC$Phase  ==  "Contract Approval"]  <-  "3. Approval"
+good.WC$Phase[good.WC$Phase  ==  "Design"]  <-  "4. Design"
+good.WC$Phase[good.WC$Phase  ==  "Pre-Installation Approvals"]  <-  "5. Pre-Installation"
+good.WC$Phase[good.WC$Phase  ==  "Installation"]  <-  "6. Installation"
+good.WC$Phase[good.WC$Phase  ==  "Completion"]  <-  "7. Completion"
+#Treating dates
+good.WC$Start.Date  <-  as.Date(good.WC$Start.Date,  format = "%m/%d/%y %H:%M")
+good.WC$End.Date  <-  as.Date(good.WC$End.Date,  format = "%m/%d/%y %H:%M")
+#Excluding Holidays & Sundays
+cal  <-  Calendar(holidaysANBIMA,  weekdays  =  'sunday')
+#Days with Both Start Dates & End dates
+good.WC  <-  good.WC[!is.na(good.WC$Task),]
+#Goodsubset
+good.WC  <-  good.WC[good.WC$Start.Date  >=  '2015-06-15',]
+data  <-  good.WC[!is.na(good.WC$Start.Date)  &  !is.na(good.WC$End.Date),  ]
+#Days with Start Dates less than Equal to End dates
+data.new  <-  data[data$Start.Date  <=  data$End.Date,  ]
+data.new$day.diff  <-  bizdays(data.new$Start.Date,  data.new$End.Date,  cal)
+data.new  <-  data.new[data.new$Start.Date  >=  '2015-06-15',]
+#Joining with the Project Attributes table to Get Project level details
+complete.data  <-  join(data.new,  PA,  by  =  "Project.Name"
+                        ,  type  =  "inner",  match  =  "all") 
+#selecting important variables from PM
+PM.1  <-  PM[,c(1,3,35)]  ;  names(PM.1)[2:3]  <-  c("Start",  "End")
+PM.1$Start  <-  as.Date(PM.1$Start,  format  =  "%m/%d/%y %H:%M")
+PM.1$End  <-  as.Date(PM.1$End,  format  =  "%m/%d/%y")
+PM.1  <-  na.omit(PM.1)  
+PM.1$End[PM.1$Start  >  PM.1$End]  <-  "2015-11-03" #For dates with no End Dates
+PM.1$day.diff  <-  bizdays(PM.1$Start,  PM.1$End,  cal)
+#Now getting to the PA dataset
+#Take only those projects that have been started after 14th June
+PA  <-  merge(PA,  data.new,  by  =   "Project.Name")[1:14]
+PA  <-  unique(PA)  
+PA  <-  merge(PA,  PM.1,  by  =   "Project.Name")
+#Eliminate all entries with Start Dates less than 15th June, to mantain the accuracy 
+PA  <-  PA[PA$Start>"2015-06-14",]  
+PA  <-  PA[,-c(15:16)]
+#Treating False values in IF_HOA column
+PA$If_HOA[PA$If_HOA  ==  2]  <-  1  
+PA$If_HOA[is.na(PA$If_HOA)]  <-  0
+#Ensuring that the Task level data only contains the completed Projects Jun-15 to 2nd Nov
+complete.data  <-  merge(complete.data,  PA,  by  =  "Project.Name")[,c(2,6,8,9:19)]
+#Changing the names of the complete data
+names(complete.data)  <-  c("Task","Time","Purchased","Contract","Install_Branch"
+    ,"Utility","Jusrisdiction","Muncipality","Size","IF_Build","IF_MPU","IF_Reroof"
+    ,"IF_HOA","IF_PE")
+CD  <-  complete.data #renaming
+#Subsetting for only Tasks with a reasonable frequency
+rm(list  =  ls()[!(ls()  %in%  'CD')]) #Cleaning the memory
+#plotly styling
+f1  <-  list(family  =  "Arial, sans-serif",  size  =  20,  color  =  "brown")
+f2  <-  list(family  =  "Arial, sans-serif",  size  =  16,  color  =  "blue")
+m  <-  list( l  =  50,  r  =  50,  b  =  50,  t  =  50,  pad  =  4) #Setting margin
+#Clubbing Few Tasks Together
+CD$Task[CD$Task  == "Schedule Installation (B)"]  <-  "Schedule Installation"
+CD$Task[CD$Task  == "Schedule Installation (C)"]  <-  "Schedule Installation"
+CD$Task[CD$Task  == "Schedule Installation (E)"]  <-  "Schedule Installation"
+CD$Task[CD$Task  == "Submit Final Interconnection (A)"]  <-  "Submit Final Interconnection"
+CD$Task[CD$Task  == "Submit Rebate Application (A)"]  <-  "Submit Rebate Application"
+CD$Task[CD$Task  == "Request NTP (B)"]  <-  "Request NTP"
+CD$Task[CD$Task  == "Receive Final Rebate Claim With Customer Signature (A)"]  <-  "Receive Final Rebate Claim With Customer Signature"
+CD$Task[CD$Task  == "Permitting Blocked, Project Needs Review"]  <-  "Projects Need Review"
+CD$Time[CD$Time  <  0]  <-  0 #cleaning bad entries
+```
+
+************
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+Task.mean  <-  aggregate(CD$Time,  by  =  list(CD$Task),  mean)
+names(Task.mean)  <-  c("Task","Mean_Time")
+Task.sd  <-  aggregate(CD$Time,  by  =  list(CD$Task),  sd)
+names(Task.sd)  <-  c("Task","Sd_Time")
+Task.data  <-  merge(CD[,c(1,2)],  Task.mean,  by  =  "Task")
+Task.data  <-  merge(Task.data,  Task.sd,  by  =  "Task")
+Task.data$nor  <-  (Task.data$Time  -  Task.data$Mean_Time)/Task.data$Sd_Time
+Task.freq  <-  aggregate(CD$Task,  by  =  list(CD$Task),  length)
+names(Task.freq)  <-  c("Task","Freq")
+
+Task.freq  <-  Task.freq[order(-Task.freq$Freq),  ] #Freq
+Task.freq$Categ  <-  NULL #Assigning a category to these tasks based on Frequency
+Task.freq$Categ[Task.freq$Freq  >  2000]  <-  "High Freq"
+Task.freq$Categ[Task.freq$Freq  <=  2000  &  Task.freq$Freq  >  400]  <-  "Mid Freq"
+Task.freq$Categ[Task.freq$Freq  <=  400]  <-  "Low Freq"
+CD  <-  merge(CD,  Task.freq,  by  =  "Task")
+CD  <-  CD[,  -15]
+
+#Box plot for the data
+a1  <-  list(title  =  'Task',  titlefont  =  f1,  showticklabels  =  TRUE,
+             tickangle  =  35,  tickfont  =  f2,  autorange  =  "reversed")
+a2  <-  list(title  =  "Average Days",  titlefont  =  f1)
+m  <-  list(l  =  50,  r  =  200,  b  =  250,  t  =  25,  pad  =  8)
+```
+
+#Statistics on each of the tasks based on their frequency
+
+***************
+##Time taken by tasks of high penetration (>90% Projects)
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Most Frequent Tasks
+plot_ly(CD[CD$Categ  ==  "High Freq",  ],  x  =  Task,  name  =  title,  y  =  Time
+,  type  =  "box") %>% layout(xaxis  =  a1,  yaxis  =  a2,  showlegend  =  FALSE
+,  margin  = m) %>% layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+***************
+##Time taken by tasks of medium penetration ([20-90]% Projects)
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Mid Frequent Tasks
+plot_ly(CD[CD$Categ  ==  "Mid Freq",  ],  x  =  Task, name  =  title,  y  =  Time
+,  type  =  "box") %>% layout(xaxis  =  a1,  yaxis  =  a2,  showlegend  =  FALSE
+,  margin  = m) %>% layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+***************
+##Time taken by tasks of low penetration (<20% Projects)
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Least Frequent Tasks
+plot_ly(CD[CD$Categ  ==   "Low Freq",  ],  x  =  Task, name  =  title,  y  =  Time
+,  type  =  "box") %>% layout(xaxis  =  a1,  yaxis  =  a2,  showlegend  =  FALSE
+,  margin  = m) %>% layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+****************
+#Binary factors on Top 10 Tasks
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+a1  <-  list(title  =  'Task',  titlefont  =  f1,  showticklabels  =  TRUE,
+             tickangle  =  45,  tickfont  =  f2,  autorange  =  "reversed")
+a2  <-  list(title  =  "Average Days",  titlefont  =  f1)
+m  <-  list(l  =  50,  r  =  200,  b  =  300,  t  =  25,  pad  =  8)
+all.factors  <-  names(CD)[10:14] #Factors,  Number of Tasks
+```
+
+##Impact of Build Partner
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Function to pick n most influenced tasks by individual factors
+cols  <-  c(all.factors[1],"Time","Task")
+plot  <-  CD[,  cols]
+data  <-  aggregate(plot$Time,  by  =  list(plot[,  all.factors[1]],  plot$Task),  mean)
+names(data)[1:2]  <-  c("var","Task")
+data1  <-  data[data$var  ==  1,  c(2,3)]  ;  data0  <-  data[data$var  ==  0,  c(2,3)]
+data2  <-  merge(data1,  data0,  by  =  'Task')  ;  data2$ratio  <-  data2$x.x/data2$x.y
+data2  <-  data2[order(-data2$ratio),  ]#Sorting the dataframe on Inlluence ratio
+data2  <-  data2[1:10,  c(1:3)] #10 rows of First 3 cols
+names(data2)  <-  c("Task",  "With",  "Without") #With & Without factor
+data3  <- reshape(data2,  varying  =  c("With", "Without"),  v.names  =  "Time"
+,  timevar  =  "Factor",  times  =  c("With", "Without"),  direction  =  "long")
+plot_ly(data  =  data3,  x  =  Task,  y  =  Time,  type  =  "bar"
+,  color  =  Factor)  %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  margin  =  m)  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+****************
+##Impact of MPU
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Function to pick n most influenced tasks by individual factors
+cols  <-  c(all.factors[2],"Time","Task")
+plot  <-  CD[,  cols]
+data  <-  aggregate(plot$Time,  by  =  list(plot[,  all.factors[2]],  plot$Task),  mean)
+names(data)[1:2]  <-  c("var","Task")
+data1  <-  data[data$var  ==  1,  c(2,3)]  ;  data0  <-  data[data$var  ==  0,  c(2,3)]
+data2  <-  merge(data1,  data0,  by  =  'Task')  ;  data2$ratio  <-  data2$x.x/data2$x.y
+data2  <-  data2[order(- data2$ratio),  ]#Sorting the dataframe on Inlluence ratio
+data2  <-  data2[1:10,  c(1:3)] #n rows of First 3 cols
+names(data2)  <-  c("Task",  "With",  "Without") #With & Without factor
+data3  <- reshape(data2,  varying  =  c("With", "Without"),  v.names  =  "Time"
+,  timevar  =  "Factor",  times  =  c("With", "Without"),  direction  =  "long")
+plot_ly(data  =  data3,  x  =  Task,  y  =  Time,  type  =  "bar"
+,  color  =  Factor)  %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  margin  =  m)  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+****************
+
+##Impact of Re-Roofing
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Function to pick n most influenced tasks by individual factors
+cols  <-  c(all.factors[3],"Time","Task")
+plot  <-  CD[,  cols]
+data  <-  aggregate(plot$Time,  by  =  list(plot[,  all.factors[3]],  plot$Task),  mean)
+names(data)[1:2]  <-  c("var","Task")
+data1  <-  data[data$var  ==  1,  c(2,3)]  ;  data0  <-  data[data$var  ==  0,  c(2,3)]
+data2  <-  merge(data1,  data0,  by  =  'Task')  ;  data2$ratio  <-  data2$x.x/data2$x.y
+data2  <-  data2[order(- data2$ratio),  ]#Sorting the dataframe on Inlluence ratio
+data2  <-  data2[1:10,  c(1:3)] #n rows of First 3 cols
+names(data2)  <-  c("Task",  "With",  "Without") #With & Without factor
+data3  <- reshape(data2,  varying  =  c("With", "Without"),  v.names  =  "Time"
+,  timevar  =  "Factor",  times  =  c("With", "Without"),  direction  =  "long")
+plot_ly(data  =  data3,  x  =  Task,  y  =  Time,  type  =  "bar"
+,  color  =  Factor)  %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  margin  =  m)  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+****************
+
+##Impact of HOA
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Function to pick n most influenced tasks by individual factors
+cols  <-  c(all.factors[4],"Time","Task")
+plot  <-  CD[,  cols]
+data  <-  aggregate(plot$Time,  by  =  list(plot[,  all.factors[4]],  plot$Task),  mean)
+names(data)[1:2]  <-  c("var","Task")
+data1  <-  data[data$var  ==  1,  c(2,3)]  ;  data0  <-  data[data$var  ==  0,  c(2,3)]
+data2  <-  merge(data1,  data0,  by  =  'Task')  ;  data2$ratio  <-  data2$x.x/data2$x.y
+data2  <-  data2[order(- data2$ratio),  ]#Sorting the dataframe on Inlluence ratio
+data2  <-  data2[1:10,  c(1:3)] #n rows of First 3 cols
+names(data2)  <-  c("Task",  "With",  "Without") #With & Without factor
+data3  <- reshape(data2,  varying  =  c("With", "Without"),  v.names  =  "Time"
+,  timevar  =  "Factor",  times  =  c("With", "Without"),  direction  =  "long")
+plot_ly(data  =  data3,  x  =  Task,  y  =  Time,  type  =  "bar"
+,  color  =  Factor)  %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  margin  =  m)  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+****************
+
+##Impact of Professional Engineer
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#Function to pick n most influenced tasks by individual factors
+cols  <-  c(all.factors[5],"Time","Task")
+plot  <-  CD[,  cols]
+data  <-  aggregate(plot$Time,  by  =  list(plot[,  all.factors[5]],  plot$Task),  mean)
+names(data)[1:2]  <-  c("var","Task")
+data1  <-  data[data$var  ==  1,  c(2,3)]  ;  data0  <-  data[data$var  ==  0,  c(2,3)]
+data2  <-  merge(data1,  data0,  by  =  'Task')  ;  data2$ratio  <-  data2$x.x/data2$x.y
+data2  <-  data2[order(- data2$ratio),  ]#Sorting the dataframe on Inlluence ratio
+data2  <-  data2[1:10,  c(1:3)] #n rows of First 3 cols
+names(data2)  <-  c("Task",  "With",  "Without") #With & Without factor
+data3  <- reshape(data2,  varying  =  c("With", "Without"),  v.names  =  "Time"
+,  timevar  =  "Factor",  times  =  c("With", "Without"),  direction  =  "long")
+plot_ly(data  =  data3,  x  =  Task,  y  =  Time,  type  =  "bar"
+,  color  =  Factor)  %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  margin  =  m)  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+************
+# Categorical factors on Top 10 Tasks
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+a1  <-  list(title  =  'Task',  titlefont  =  f1,  showticklabels  =  TRUE,
+             tickangle  =  45,  tickfont  =  f2,  autorange  =  "reversed")
+a2  <-  list(title  =  "Average Days",  titlefont  =  f1)
+m  <-  list(l  =  50,  r  =  200,  b  =  300,  t  =  25,  pad  =  8)
+```
+
+##Contract wise spread of task time
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#variations at Contract Type
+main.task  <-  aggregate(CD$Time,  by  =  list(CD$Task),  mean)
+names(main.task)  <-  c("Task","Time")
+main.task  <-  main.task[order(-main.task$Time),  ][1:10,  ]
+#Pulling the data from the main set for categoricals
+cols  <-  c("Contract","Time","Task")
+data1  <-  CD[,  cols]  ;  names(data1)[1]  <-  "Factor"
+#Choosing only top 10 Categorical levels by frequency
+small.task  <-  data.frame(table(CD[, "Contract"]))
+names(small.task)  <-  c("Factor","Freq")
+small.task  <-  small.task[order(-small.task$Freq),  ][1:5,  ]  
+good.data  <-  merge(data1,  small.task,  by  =  "Factor")[,1:3]
+good.data  <-  merge(good.data,  main.task,  by  =  "Task")[,1:3] 
+data.1  <-  unique(good.data[,c(1,2)])
+d  <-  aggregate(data.1$Task,  by  =  list(data.1$Task),  length)  ;  names(d)  <-  c("Task","cnt")
+good.data  <-  merge(good.data,  d,  by  =  "Task")[,1:4] 
+good.data  <-  good.data[order(-good.data$cnt), ]  ;  good.data  <-  good.data[,  -4]
+#Plotting the same on a facet_wrap
+plot_ly(good.data,  x  =  Task,  y  =  Time.x,  color  =  Factor
+,  type  =  "box")  %>%  layout( xaxis  =  a1,  yaxis  =  a2,  margin  =  m
+,  boxmode  =  "group",  legend  =  list(x  =  1
+,  y  =  1))  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+*********************
+
+##Installation Branch wise spread of task time 
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#variations at Install Branch type
+main.task  <-  aggregate(CD$Time,  by  =  list(CD$Task),  mean)
+names(main.task)  <-  c("Task","Time")
+main.task  <-  main.task[order(-main.task$Time),  ][1:10,  ]
+#Pulling the data from the main set for categoricals
+cols  <-  c("Install_Branch","Time","Task")
+data1  <-  CD[,  cols]  ;  names(data1)[1]  <-  "Factor"
+#Choosing only top 10 Categorical levels by frequency
+small.task  <-  data.frame(table(CD[, "Install_Branch"]))
+names(small.task)  <-  c("Factor","Freq")
+small.task  <-  small.task[order(-small.task$Freq),  ][1:5,  ]  
+good.data  <-  merge(data1,  small.task,  by  =  "Factor")[,1:3]
+good.data  <-  merge(good.data,  main.task,  by  =  "Task")[,1:3] 
+data.1  <-  unique(good.data[,c(1,2)])
+d  <-  aggregate(data.1$Task,  by  =  list(data.1$Task),  length) 
+names(d)  <-  c("Task","cnt")
+good.data  <-  merge(good.data,  d,  by  =  "Task")[,1:4] 
+good.data  <-  good.data[order(good.data$cnt), ]  ;  good.data  <-  good.data[,  -4]
+#Plotting the same on a facet_wrap
+plot_ly(good.data,  x  =  Task,  y  =  Time.x,  color  =  Factor
+,  type  =  "box")  %>%  layout(xaxis  =  a1,  yaxis  =  a2 
+,  margin  =  m,  boxmode  =  "group",  legend  =  list(x  =  1
+,  y  =  1))  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+*********************
+
+##Utility wise spread of task time 
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#variations at Utility type
+main.task  <-  aggregate(CD$Time,  by  =  list(CD$Task),  mean)
+names(main.task)  <-  c("Task","Time")
+main.task  <-  main.task[order(-main.task$Time),  ][1:10,  ]
+#Pulling the data from the main set for categoricals
+cols  <-  c("Utility","Time","Task")
+data1  <-  CD[,  cols]  ;  names(data1)[1]  <-  "Factor"
+#Choosing only top 10 Categorical levels by frequency
+small.task  <-  data.frame(table(CD[, "Utility"]))
+names(small.task)  <-  c("Factor","Freq")
+small.task  <-  small.task[order(-small.task$Freq),  ][1:5,  ]  
+good.data  <-  merge(data1,  small.task,  by  =  "Factor")[,1:3]
+good.data  <-  merge(good.data,  main.task,  by  =  "Task")[,1:3] 
+data.1  <-  unique(good.data[,c(1,2)])
+d  <-  aggregate(data.1$Task,  by  =  list(data.1$Task),  length)  ;  names(d)  <-  c("Task","cnt")
+good.data  <-  merge(good.data,  d,  by  =  "Task")[,1:4] 
+good.data  <-  good.data[order(good.data$cnt), ]  ;  good.data  <-  good.data[,  -4]
+#Plotting the same on a facet_wrap
+plot_ly(good.data,  x  =  Task,  y  =  Time.x,  color  =  Factor
+,  type  =  "box")  %>%  layout(xaxis  =  a1,  yaxis  =  a2 
+,  margin  =  m,  boxmode  =  "group",  legend  =  list(x  =  1
+,  y  =  1))  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+
+*********************
+
+##Jurisdiction wise spread of task time
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#variations at Jurisdiction type
+main.task  <-  aggregate(CD$Time,  by  =  list(CD$Task),  mean)
+names(main.task)  <-  c("Task","Time")
+main.task  <-  main.task[order(-main.task$Time),  ][1:10,  ]
+#Pulling the data from the main set for categoricals
+cols  <-  c("Jusrisdiction","Time","Task")
+data1  <-  CD[,  cols]  ;  names(data1)[1]  <-  "Factor"
+#Choosing only top 10 Categorical levels by frequency
+small.task  <-  data.frame(table(CD[, "Jusrisdiction"]))
+names(small.task)  <-  c("Factor","Freq")
+small.task  <-  small.task[order(-small.task$Freq),  ][1:5,  ]  
+good.data  <-  merge(data1,  small.task,  by  =  "Factor")[,1:3]
+good.data  <-  merge(good.data,  main.task,  by  =  "Task")[,1:3] 
+data.1  <-  unique(good.data[,c(1,2)])
+d  <-  aggregate(data.1$Task,  by  =  list(data.1$Task),  length)  ;  names(d)  <-  c("Task","cnt")
+good.data  <-  merge(good.data,  d,  by  =  "Task")[,1:4] 
+good.data  <-  good.data[order(-good.data$cnt), ]  ;  good.data  <-  good.data[,  -4]
+#Plotting the same on a facet_wrap
+plot_ly(good.data,  x  =  Task,  y  =  Time.x,  color  =  Factor
+,  type  =  "box")  %>%  layout(xaxis  =  a1,  yaxis  =  a2,  margin  =  m
+,  boxmode  =  "group",  legend  =  list(x  =  1
+,  y  =  1))  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+*********************
+
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#---------------------#--------------------#---------------------#---------------------
+#-----------------#  Clearing the environment ----#---------------------
+#---------------------#--------------------#---------------------#---------------------
+#unloading all the packages
+detach("package:sqldf",  unload  =  TRUE)
+detach("package:lubridate",  unload  =  TRUE)
+detach("package:bizdays",  unload  =  TRUE)
+detach("package:rCharts",  unload  =  TRUE)
+detach("package:clickme",  unload  =  TRUE)
+detach("package:plotly",  unload  =  TRUE)
+detach("package:ggplot2",  unload  =  TRUE)
+detach("package:tcltk2",  unload  =  TRUE)
+detach("package:plyr",  unload  =  TRUE)
+detach("package:ade4",  unload  =  TRUE)
+#Removing all the objects too
+rm(list  =  ls())
+```

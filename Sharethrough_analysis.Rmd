@@ -1,0 +1,239 @@
+---
+title: '**Tracking User activities on Adds with interactive dashboards**'
+author: "Abhishek"
+date: "March 26, 2016"
+output:
+  html_document:
+    toc: yes
+  pdf_document:
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+  word_document: default
+---
+
+```{r,  echo  =  FALSE,  results  =  'hide',  message  =  FALSE,  warning  =  FALSE}
+#-------------#-------------# Setting the environment #-------------#-------------#
+#Loading the libraries
+library(plotly)  ;  library(Hmisc)  ;  library(doMC) #For Multithreading
+registerDoMC()#Multithreading
+setwd('~/Desktop/courses/PAST/Interview_Skills/Sharethrough/')#The path
+
+#loading the datasets
+MPCDE  <-  read.csv('str-data-challenge-mpcde.csv',  header  =  T)
+PC  <-  read.csv('str-data-challenge-pc.csv',  header  =  T)
+PL  <-  read.csv('str-data-challenge-pl.csv',  header  =  T)
+
+summary(MPCDE)  ;  dim(MPCDE)  ;  str(MPCDE)#Basic exploration of the datasets
+cat("Table MPCDE: Performance of each add across different cuts")
+
+table(MPCDE$FIFTEEN_SECOND_VIEWS) #All NULLS
+table(MPCDE$THIRTY_SECOND_VIEWS) #All NULLS
+
+#Since the last 2 columns of MPCDE are all NULLs lets exclude them
+#Since the Date is held constant, lets exclude that too
+MPCDE  <-  MPCDE[,  -c(1,21:22)]
+
+#Renaming the column in PL dataframe to the more accepted 'PLACEMENT_KEY'
+names(PL)[1]  <-  "PLACEMENT_KEY"
+
+#Now counting number of the common variable "PLACEMENT_KEY" for the 3 datasets
+length(unique(PL$PLACEMENT_KEY))  #4665
+length(unique(PC$PLACEMENT_KEY))  #5365
+length(unique(MPCDE$PLACEMENT_KEY))  #1546
+
+#framing a bigger dataset
+big.data  <-  merge(MPCDE,  PL,  by  =  "PLACEMENT_KEY",  all.x  =  T)
+rm(MPCDE,  PL,  PC)
+
+#Adding a column for all the views & shares
+big.data$ViewsplusShares  <-  apply(big.data[,  c(11:18)],  1,  sum)
+
+big.data  <-  big.data[,  -c(11:19)]#getting rid of the superflous columns
+
+#plotly styling
+f1  <-  list(family  =  "Arial, sans-serif",  size  =  16,  color  =  "Green")
+f2  <-  list(family  =  "Arial, sans-serif",  size  =  12,  color  =  "Brown")
+m  <-  list(l  =  100,  r  =  100,  b  =  100,  t  =  25,  pad  =  16) #Setting margin
+```
+
+# (Views + Shares) 
+```
+We have added up all the shares & Views from columns, namely:
+  1.  Twitter shares
+  2.  Facebook shares
+  3.  Vine shares
+  4.  Custom shares
+  5.  Email shares
+  6.  Three second views
+  7.  Auto play views
+  8.  Video plays
+  
+to create a new column 'Views + Shares' for our analysis. This is a collective measure of a 
+user's digital activity on the add.
+```
+
+*******************
+#Country wise click rate percentage (clicks/visible impressions) conditioned on Brand Guarantee (BG)
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+data.1a  <-  aggregate(big.data$CLICKS,  by  =  list(big.data$COUNTRY
+                                      ,  big.data$GUARANTEED_BRAND_SAFE),  sum)
+data.1b  <-  aggregate(big.data$VISIBLE_IMPRESSIONS
+            ,  by  =  list(big.data$COUNTRY,  big.data$GUARANTEED_BRAND_SAFE),  sum)
+data.1  <-  merge(data.1a,  data.1b,  by  =  c("Group.1","Group.2"))
+names(data.1)  <-  c("Country",  "Brand_Guarantee",  "Clicks",  "Impressions")
+data.1$ratio  <-  ifelse(data.1$Impressions  ==  0,  0,  data.1$Clicks * 100/ data.1$Impressions)
+data.1$ratio  <-  round(data.1$ratio,  2)
+data.1  <-  data.1[,  -c(3,4)]
+data.1a  <-  data.1[data.1$Brand_Guarantee  ==  1,  ]
+data.1b  <-  data.1[data.1$Brand_Guarantee  ==  0,  ]
+data.1  <-  cbind(data.1a,  data.1b)  ;  data.1  <-  data.1[,  -c(2,4,5)]
+names(data.1)[2:3]  <-  c("With_BG",  "Without_BG")   
+data.1$gap  <-  data.1$With_BG  -  data.1$Without_BG  
+data.1  <-  data.1[order(data.1$gap),  ]
+
+#plot
+a1  <-  list(title  =  "(Click/Viewed_Impressions) %",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2)
+a2  <-  list(title  =  "Country",  titlefont  =  f1,  tickfont  =  f2)
+
+plot_ly(data.1,  x  =  With_BG,  y  =  Country,  name  =  "With BG",  mode  =  "markers"
+      ,  marker  =  list(color  =  "Blue",  size  =  12))   %>%  add_trace(x  =  Without_BG
+      ,  name  =  "Without BG", marker  =  list(color  =  "Orange",  size  =  12))  %>%  layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1000
+                          ,  height  =  500,  margin  =  m)
+```
+```
+Observations:
+    1. 'FR' (France) has the highest click rate across all geographies once Brand guarantee
+    gets into action
+    2. 'ES' witnessed the largest difference in click rate before (orange) & after(blue) 
+    Brand guarantee
+```
+
+************
+#Country wise (Views + Shares/visible impressions) percentage conditioned on Brand Guarantee (BG)
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+data.2a  <-  aggregate(big.data$ViewsplusShares,  by  =  list(big.data$COUNTRY,  big.data$GUARANTEED_BRAND_SAFE),  sum)
+data.2b  <-  aggregate(big.data$VISIBLE_IMPRESSIONS
+            ,  by  =  list(big.data$COUNTRY,  big.data$GUARANTEED_BRAND_SAFE),  sum)
+data.2  <-  merge(data.2a,  data.2b,  by  =  c("Group.1","Group.2"))
+names(data.2)  <-  c("Country",  "Brand_Guarantee",  "SharesplusViews",  "Impressions")
+data.2$Brand_Guarantee  <-  ifelse(data.2$Brand_Guarantee  ==  1,  "With BG",  "Without BG")
+data.2$ratio  <-  ifelse(data.2$Impressions  ==  0,  0,  data.2$SharesplusViews * 100/ data.2$Impressions)
+data.2$ratio  <-  round(data.2$ratio,  2)
+data.2  <-  data.2[order(data.2$ratio),  ]
+
+#plot
+a1  <-  list(title  =  "Country",  titlefont  =  f1,  showticklabels  =  TRUE,  tickfont  =  f2)
+a2  <-  list(title  =  "(Views + Shares)/Viewed_Impressions  %",  titlefont  =  f1,  tickfont  =  f2)
+
+plot_ly(data.2,  x  =  Country,  y  =  ratio,  symbol  =  Brand_Guarantee
+        , colors = "PuOr",  mode  =  "markers",  marker  =  list(size  =  12))  %>% layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1000
+,  height  =  500,  margin  =  m)
+```
+```
+Observations:
+    1. Only North American countries ('US', 'CA') have a significant (Views + Shares) rate
+    2. The trend is counter intutive in the above 2 countries, as (View + Shares) rate has decreased 
+    under the presence of brand guarantee
+```
+
+**********************
+#Device Category wise Filled pages rate % (Filled Pages/ Total Impressions) by Post location
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+data.3a  <-  aggregate(big.data$FILLED_PAGES,  by  =  list(big.data$DEVICE_CATEGORY
+                                      ,  big.data$LOCATION_TYPE),  sum)
+data.3b  <-  aggregate(big.data$TOTAL_IMPRESSION_REQUESTS,  by  =  list(big.data$DEVICE_CATEGORY,  big.data$LOCATION_TYPE),  sum)
+data.3  <-  merge(data.3a,  data.3b,  by  =  c("Group.1","Group.2"))
+names(data.3)  <-  c("DEVICE",  "LOCATION",  "Filled_Pages",  "TOTAL_Impressions")
+data.3$ratio  <-  ifelse(data.3$TOTAL_Impressions  ==  0,  0,  data.3$Filled_Pages * 100/ data.3$TOTAL_Impressions)
+data.3$ratio  <-  round(data.3$ratio,  2)
+
+#plot
+a1  <-  list(title  =  'LOCATION OF POST',  titlefont  =  f1,  showticklabels  =  TRUE,
+             tickangle  =  0,  tickfont  =  f2)
+a2  <-  list(title  =  "(Filled Page/Total_Impressions_Requests) %",  titlefont  =  f1)
+
+plot_ly(data  =  data.3,  x  =  LOCATION,  y  =  ratio,  type  =  "bar"
+,  color  =  DEVICE)  %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  margin  =  m)  %>%  layout(autosize  =  F,  width  =  1000,  height  =  500)
+```
+```
+Observations:
+    1. Filled Page rate is similar for all location types for any device
+    2. Average Filled Page rate has been nearly 23% on the whole
+```
+
+************
+#Device Category wise (Views + Shares/ Visible Impressions) % by Post location
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+data.4a  <-  aggregate(big.data$ViewsplusShares,  by  =  list(big.data$DEVICE_CATEGORY
+                                      ,  big.data$LOCATION_TYPE),  sum)
+data.4b  <-  aggregate(big.data$VISIBLE_IMPRESSIONS,  by  =  list(big.data$DEVICE_CATEGORY,  big.data$LOCATION_TYPE),  sum)
+data.4  <-  merge(data.4a,  data.4b,  by  =  c("Group.1","Group.2"))
+names(data.4)  <-  c("DEVICE",  "LOCATION",  "Views_Shares",  "V_Impressions")
+data.4$ratio  <-  ifelse(data.4$V_Impressions  ==  0,  0,  data.4$Views_Shares * 100/ data.4$V_Impressions)
+data.4$ratio  <-  round(data.4$ratio,  2)
+
+#plot
+a1  <-  list(title  =  'LOCATION OF POST',  titlefont  =  f1,  showticklabels  =  TRUE,
+             tickangle  =  0,  tickfont  =  f2)
+a2  <-  list(title  =  "(View + Shares) %",  titlefont  =  f1)
+
+plot_ly(data.4,  x  =  LOCATION,  y  =  ratio,  text  =  paste("Phase: ", DEVICE),
+        mode  =  "markers",  color  =  DEVICE,  size  =  ratio/4) %>% layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1000
+,  height  =  500,  margin  =  m)
+```
+```
+observations:
+    1. 'Tablets' have the highest (Views + Shares) rate amongst the devices
+    2. 'Other' has the highest (Views + Shares) rate amongst all locations
+```
+
+************
+#Dispersion of Mean Total Impressions requests and mean Impressions for each publisher device wise
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+data.6a  <-  aggregate(big.data$TOTAL_IMPRESSION_REQUESTS,  by  =  list(big.data$PLACEMENT_KEY
+                                              ,  big.data$DEVICE_CATEGORY),  mean)
+data.6b  <-  aggregate(big.data$IMPRESSIONS,  by  =  list(big.data$PLACEMENT_KEY
+                                      ,  big.data$DEVICE_CATEGORY),  mean)
+data.6  <-  merge(data.6a,  data.6b,  by  =  c("Group.1","Group.2"))
+names(data.6)  <-  c("PLACEMENT_KEY","DEVICE","T_IMPRESSIONS","IMPRESSIONS")
+
+#plot
+a1  <-  list(title  =  'Mean Total Impressions requests for each post \t\t\t\t\t'
+             ,  titlefont  =  f1,  showticklabels  =  TRUE,  tickangle  =  0,  tickfont  =  f2)
+a2  <-  list(title  =  "Mean Impressions for each post",  titlefont  =  f1,  tickfont  =  f2)
+
+plot_ly(data.6,  x  =  IMPRESSIONS,  y  =  T_IMPRESSIONS,  type  =  "scattergl",  mode  =  "markers"
+,  color  =  DEVICE,  marker  =  list(size  =  12)) %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1000,  height  =  700,  margin  =  m)
+cat("\n\n\n\n")
+```
+***************
+
+```{r,  eval  =  TRUE,  echo  =  FALSE,  warning  =  FALSE}
+cat(".\n.\n.\n.\n.\n.\n.\n.\n.\n")
+cat("We witness a linear dependency between the mean of Total Impression requests and Impressions. So 
+let us quantify the correlation between these 2 quantities and the significance between the 2 quantities,
+using a simple Correlation test")
+cor.test(data.6$T_IMPRESSIONS,  data.6$IMPRESSIONS)
+cat("The test proves, that there is a significant corrrelation between Total Impression requests & Impressions.
+Their correlation is .873.")
+```
+
+
+
+```{r,  echo  =  FALSE,  warning  =  FALSE,  message  =  FALSE}
+#-----------------#  Clearing the environment ----#---------------------
+#unloading all the packages 
+detach("package:Hmisc",  unload  =  TRUE)
+detach("package:plotly",  unload  =  TRUE)
+detach("package:doMC",  unload  =  TRUE)
+#Removing all the objects too
+rm(list  =  ls())
+```

@@ -1,0 +1,511 @@
+---
+title: '**Visualization_Completed_post_Jun_15**'
+output:
+  html_document:
+    highlight: tango
+    number_sections: yes
+    theme: flatly
+    toc: yes
+    toc_depth: 2
+  pdf_document:
+    highlight: zenburn
+    number_sections: yes
+    toc: yes
+    toc_depth: 2
+  word_document: default
+---
+
+```{r,  echo  =  FALSE,  results  =  'hide',  message  =  FALSE,  warning  =  FALSE}
+#loading the libraries
+library(plyr)  ;  library(sqldf)  ;  library(ggplot2)  ;  library(scales)
+library(lubridate)  ;  library(bizdays)  ;  library(plotly)
+```
+
+```{r,  echo  =  FALSE,  results  =  'hide',  message  =  FALSE,  warning  =  FALSE}
+#laoding the datasets
+Project_milestone  <-  read.csv("~/Desktop/courses/PAST/Practicum1/Datasets/Sunrun/WFM_Project_Milestone_Dates.csv")  
+Project_Attributes  <-  read.csv("~/Desktop/courses/PAST/Practicum1/Datasets/Sunrun/Project_Attributes copy.csv")
+Project_Attributes  <-  Project_Attributes[  ,  -c(15:16)]
+
+#Creating aliases
+PM  <-  Project_milestone  ;  PA  <-  Project_Attributes  ; rm(Project_Attributes,Project_milestone)
+
+#removing duplicates from both the dataset
+PM  <-  PM[!duplicated(PM$Project.Name), ]  ;  PA  <-  PA[!duplicated(PA$Project.Name), ]   
+
+#changing to suitable names
+names(PA)  <-  c("Project.Name","Status","Purchased.through","Contract.type",
+"Install.Branch","Utility","jurisdiction","Muncipality","System.size","If_build",
+"if_MPU","If_Re_roof","If_HOA","If_PEStamp")
+
+#Completion dates data
+WC  <-  read.csv("~/Desktop/courses/PAST/Practicum1/Datasets/Sunrun/WFM_Completion_Dates.csv")
+attach(WC)  
+data  <-  WC[,c("Phase.Name",  "Workflow.Task.Name")]
+names(data)  <-  c("Phase",  "Task")  ;  detach(WC)
+#aggregating the bad.data to clean it
+data.1  <-  sqldf("select Task,  Phase,  count(*) cnt from data group by Task,  Phase")
+data.2  <-  data.1[order(-data.1$cnt),  ]#descending order, Task
+#removing misclassified tasks out
+data.3  <-  data.2[!duplicated(data.2$Task), ]  
+#removing "Tasks" with too little counts (less than equal to 500 steps)
+data.4  <-  data.3[data.3$cnt  >  500,  ]
+data.4  <-  data.4[,  -3]
+#total counts lost as percentage
+sum(data.3$cnt[data.3$cnt  <=  500])  *  100 /  sum(data.3$cnt) #4.2% thats okay
+#mapping the resulatant to the original dataset
+names(WC)[2 :  3]  <-  c("old.Phase",  "Task")
+
+#join using the "plyr" package
+good.WC   <-  join(WC,  data.4,  by = "Task",  type  =  "inner",  match  =  "all")
+#Using the correct phase information
+good.WC  <-  good.WC[  ,  -c(2,  6)]
+
+#Correcting column names
+good.WC$Phase  <-  as.character(good.WC$Phase)
+good.WC$Phase[good.WC$Phase  ==  "Project Initiation"]  <-  "1. Initiation"
+good.WC$Phase[good.WC$Phase  ==  "Site Audit"]  <-  "2. Audit"
+good.WC$Phase[good.WC$Phase  ==  "Contract Approval"]  <-  "3. Approval"
+good.WC$Phase[good.WC$Phase  ==  "Design"]  <-  "4. Design"
+good.WC$Phase[good.WC$Phase  ==  "Pre-Installation Approvals"]  <-  "5. Pre-Installation"
+good.WC$Phase[good.WC$Phase  ==  "Installation"]  <-  "6. Installation"
+good.WC$Phase[good.WC$Phase  ==  "Completion"]  <-  "7. Completion"
+
+#Treating dates
+good.WC$Start.Date  <-  as.Date(good.WC$Start.Date,  format = "%m/%d/%y %H:%M")
+good.WC$End.Date  <-  as.Date(good.WC$End.Date,  format = "%m/%d/%y %H:%M")
+#Excluding Holidays & Sundays
+cal  <-  Calendar(holidaysANBIMA,  weekdays  =  'sunday')
+#Days with Both Start Dates & End dates
+good.WC  <-  good.WC[!is.na(good.WC$Task),]
+#Goodsubset
+good.WC  <-  good.WC[good.WC$Start.Date  >=  '2015-06-15',]
+data  <-  good.WC[!is.na(good.WC$Start.Date) & !is.na(good.WC$End.Date),  ]
+#Days with Start Dates less than Equal to End dates
+data.new  <-  data[data$Start.Date  <=  data$End.Date,  ]
+data.new$day.diff  <-  bizdays(data.new$Start.Date,  data.new$End.Date,  cal)
+data.new  <-  data.new[data.new$Start.Date  >=  '2015-06-15',]
+
+#Joining with the Project Attributes table to Get Project level details
+complete.data  <-  join(data.new,  PA,  by  =  "Project.Name"
+                        ,  type  =  "inner",  match  =  "all") 
+
+#Sorting the other dataset
+data.new  <-  data.new[order(-data.new$day.diff),]
+data.new  <-  data.new[-1,]
+phases  <-  unique(data.new$Phase)  ;  phases  <-  phases[order(phases)]
+
+#Picking the rows Which have been completed
+names(PM)[35]  <-  "End.date" #changing the name of the End date column
+#Completed projects
+Projects  <-  PM[!(is.na(PM$End.date)  |  PM$End.date  ==  ""),  c(1,  3)]
+names(Projects)  <-  c("Project.Name",  "Project.Start.Date")
+Projects  <-  na.omit(Projects) #Removing Projects with Junk names
+
+#Selecting Only those projects that have been started after 14th June
+Projects$Project.Start.Date  <-  as.Date(Projects$Project.Start.Date
+                                         ,  format = "%m/%d/%y %H:%M")
+Projects  <-  data.frame(Projects[Projects$Project.Start.Date >=  "2015-06-15",  1])
+names(Projects)  <-  "Project.Name"  
+
+#Analysis based on Start Dates
+names(PM)[3]  <-  "Project.Start.Date" #changing the name of the End date column
+#Completed projects
+Projects.S  <-  PM[!(is.na(PM$Project.Start.Date)  |  PM$Project.Start.Date  ==  ""),  c(1,  3)]
+names(Projects.S)  <-  c("Project.Name",  "Project.Start.Date")
+Projects.S  <-  na.omit(Projects.S) #Removing Projects with Junk names
+
+#Selecting Only those projects that have been started after 14th June
+Projects.S$Project.Start.Date  <-  as.Date(Projects.S$Project.Start.Date
+                                         ,  format = "%m/%d/%y %H:%M")
+#7348 Started before "15th June, 2015"
+#17966 Started on & after "15th June, 2015"
+#Subsetting data for completion
+complete.data  <-  join(complete.data,  Projects,  by  =  "Project.Name"
+                        ,  type  =  "inner",  match  =  "all") 
+data.new  <-  join(data.new,  Projects,  by  =  "Project.Name"
+                        ,  type  =  "inner",  match  =  "all") 
+good.WC  <-  join(good.WC,  Projects,  by  =  "Project.Name"
+                        ,  type  =  "inner",  match  =  "all")
+good.WC  <-  na.omit(good.WC)  ;  data.new  <-  na.omit(data.new)
+
+#plotly styling
+f1  <-  list(family  =  "Arial, sans-serif",  size  =  20,  color  =  "brown")
+f2  <-  list(family  =  "Arial, sans-serif",  size  =  16,  color  =  "blue")
+f3  <-  list(family  =  "Arial, sans-serif",  size  =  12,  color  =  "blue")
+m  <-  list( l  =  50,  r  =  50,  b  =  50,  t  =  50,  pad  =  4) #Setting margin
+```
+
+************
+
+# Number of Ongoing projects per phase
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+m  <-  unique(good.WC[,  c(1,5)])
+Phase.count  <-  aggregate(m$Phase,  by  =  list(m$Project.Name),  length)
+names(Phase.count)  <-  c("Project",  "count")
+phase.data  <-  aggregate(Phase.count$Project,  by  =  list(Phase.count$count)
+                          ,  length)
+names(phase.data)  <-  c("Phases",  "Frequency")
+phase.data$Frequency  <-  phase.data$Frequency/1000
+
+#Styling
+a1  <-  list(autotick  =  FALSE,  ticks  =  "outside",  tick0  =  1,  dtick  =  1,
+           ticklen  =  7,  tickwidth  =  2,  tickcolor  =  toRGB("blue")
+           ,  title  =  "Phases",  titlefont  =  f1)
+a2  <-  list(title  =  "Number of Projects ('000) \n",  titlefont  =  f1)
+
+#Boxplot for the data
+plot_ly(x  =  Phases,  y  =  Frequency,  name  =  "Number of Projects on each phase"
+        ,  type  =  "bar",  data  =  phase.data) %>% layout(xaxis  =  a1,
+                                                            yaxis  =  a2)
+```
+
+*******************
+
+# Number of steps completed and the number of projects
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+m1  <-  aggregate(good.WC$Task,  by  =  list(good.WC$Project.Name),  length)
+names(m1)  <-  c("Project",  "count")
+#checking out the plot for each project & number of steps involved
+q  <-  ggplot(data  =  m1,  aes(x  =  count,  fill  =  "blue"))  
+q  <-  q  +  geom_histogram(binwidth  =  1,  color  =  "black")
+q  <-  q  +  theme_bw()  +  xlab("\n Number of steps completed")
+q  <-  q  +  ylab("Number of projects \n")  +   guides(fill  =  FALSE)
+q  <-  q  +  ggtitle("Frequency distribution of projects & steps")
+q  <-  q  +  scale_x_continuous(breaks  =  seq(1,  49,  2))
+q  <-  q  +  scale_y_continuous(labels  =  comma)
+q  <-  q  +  theme(
+  axis.title  =  element_text(size  =  20,  color  =  "brown",  face  =  "bold"),
+  axis.title.y  =  element_text(vjust  =  1)
+)
+q
+```
+
+*******************
+# Average time taken per step per phase 
+
+```
+Days taken for each phase excluding Sundays and US holidays.
+```
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+#Plot for Average number of steps involved per phase
+m3  <-  aggregate(data.new$day.diff,  by  =  list(data.new$Phase),  mean)
+names(m3)  <-  c("Phase",  "Avg.days")
+#Sorting as per the exceution order
+m3   <-  m3[c(6,2,7,3,5,4,1),]   ;  row.names(m3)  <-  c(1:7)
+
+g3  <-  ggplot(data  =  m3,  aes(x  =  Phase,  y  =  Avg.days,  fill  =  Phase)) 
+g3  <-  g3  +  geom_bar(colour  =  "black",  stat  =  "identity")  
+g3  <-  g3  +  guides(fill  =  FALSE)  
+g3  <-  g3  +  ggtitle("Avg days per phase per step")
+g3  <-  g3  +  labs(x  =  "\n Phases",  y  =  "\n Days") 
+g3  <-  g3  +  theme(
+  axis.title  =  element_text(size  =  20,  color  =  "brown",  face  =  "bold"),
+  axis.title.y  =  element_text(vjust  =  2))
+g3  +  theme(axis.text.x  =  element_text(angle  =  10,  hjust  =  1))
+
+#Box plot for the data
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE,
+  tickangle  =  0,  tickfont  =  f2)
+a2  <-  list(title  =  "Days",  titlefont  =  f1)
+data.new  <-  data.new[order(data.new$Phase),]
+
+#Box plot for the data
+plot_ly(data.new,  x  =  Phase,  y  =  day.diff,  type  =  "box") %>% layout(xaxis  =  a1
+                      ,  yaxis  =  a2,  showlegend  =  FALSE,  autorange  =  'reversed') %>% layout(autosize  =  F
+,  width  =  1000,  height  =  500,  margin  =  m)
+```
+All phases have plenty of outliers, skewing the distribution of average days per phase.
+
+*******************
+
+# Average days taken per step per phase Installation branch wise
+
+```{r,  echo  =  FALSE,  message  =  FALSE,  warning  =  FALSE}
+#Subsetting data of interest
+cols  <-  c("Install.Branch","day.diff","Phase")
+p4  <-  complete.data[,  cols]
+plot4  <-  aggregate(p4$day.diff,  by  =  list(p4$Install.Branch,  p4$Phase),  mean)
+names(plot4)  <-  c("Install.Branch",  "Phase",  "Avg.Days")
+
+#plot
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE,
+  tickangle  =  0,  tickfont  =  f2)
+a2  <-  list(title  =  "Days",  titlefont  =  f1)
+
+plot_ly(plot4,  x  =  phases,  y  =  Avg.Days,  text  =  paste("Phase: ", Phase),
+        mode  =  "markers",  color  =  Install.Branch,  size  =  Avg.Days) %>% layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1100
+,  height  =  500,  margin  =  m)
+```
+
+*******************
+
+# Average days taken per step per phase by contract type
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+#Subsetting data of interest
+cols  <-  c("Contract.type","day.diff","Phase")
+p5  <-  complete.data[,  cols]
+plot5  <-  aggregate(p5$day.diff,  by  =  list(p5$Contract.type,  p5$Phase),  mean)
+names(plot5)  <-  c("Contract.type",  "Phase",  "Avg.Days")
+
+#Changing the names of Contract to more appopriate
+plot5  <-  within(plot5,  levels(Contract.type)
+[levels(Contract.type)  ==  "Custom PPA Fixed"] <-  "PPA")
+plot5  <-  within(plot5,  levels(Contract.type)
+[levels(Contract.type)  ==  "Custom Lease"] <-  "Lease")
+plot5  <-  within(plot5,  levels(Contract.type)
+[levels(Contract.type)  ==  "Customer Owned - Bank Financed"] <-  "Financed")
+plot5  <-  within(plot5,  levels(Contract.type)
+[levels(Contract.type)  ==  "Customer Owned - Full Upfront"] <-  "Full.Upfront")
+plot5  <-  within(plot5,  levels(Contract.type)
+[levels(Contract.type)  ==  "Low Upfront Lease"] <-  "Low.Upfront")
+plot5  <-  within(plot5,  levels(Contract.type)
+[levels(Contract.type)  ==  "Low Upfront"] <-  "Low.Upfront")
+plot5  <-  within(plot5,  levels(Contract.type)
+[levels(Contract.type)  ==  "Low Upfront PPA Fixed"] <-  "Low.Upfront.PPA")
+plot5  <-  plot5[plot5$Contract.type  !=  "",  ]  #Removing Missing values
+
+#plot
+a1  <-  list(title  =  "Contract Type",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,tickangle  =  10,  tickfont  =  f3)
+a2  <-  list(title  =  "Days",  titlefont  =  f1)
+
+plot_ly(plot5,  x  =  Contract.type,  y  =  Avg.Days,  symbol  =  Phase
+        , colors = "PuOr",  mode  =  "markers")  %>% layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1000
+,  height  =  500,  margin  =  m)
+```
+
+*******************
+
+# Avg days taken per step for projects
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+#Subsetting data of interest
+cols  <-  c("Project.Name","day.diff","Phase")
+p6  <-  complete.data[,  cols]
+plot6  <-  aggregate(p6$day.diff,  by  =  list(p6$Project.Name,  p6$Phase),  mean)
+names(plot6)  <-  c("Project","Phase","avg.days")
+#aggregrating the data again
+plot6  <-  aggregate(plot6$avg.days,  by  =  list(plot6$Project),  mean)
+names(plot6)  <-  c("Project","Avg.duration")
+
+#Treating Outliers : [0, 15] Fixing Range
+plot6[plot6$Avg.duration  >  15,  2]  <-  15
+plot6[plot6$Avg.duration  <  0,  2]  <-  0
+
+g6  <-  ggplot(plot6,  aes(x  =  Avg.duration)) 
+g6  <-  g6  +  geom_histogram(color  =  "black",  fill  =  "lightblue",  binwidth  =  1)  
+g6  <-  g6  +  ggtitle("Frequency distribution of Avg time taken per step")  
+g6  <-  g6  +  xlab("\n Avg duration for each step (days)")
+g6  <-  g6  +  ylab("Frequency of Projects \n")
+g6  <-  g6  +  theme(axis.text  =  element_text(size  =  12)
+        ,  axis.title  =  element_text(size  =  16,  face  =  "bold"))
+g6  <-  g6  +  scale_y_continuous(labels  =  comma)
+g6  +  theme(
+  axis.title  =  element_text(size  =  20,  color  =  "brown",  face  =  "bold"),
+  axis.title.y  =  element_text(vjust  =  1)
+)
+```
+
+*******************
+
+# Average days taken per step for each phase conditioned on Re-Roofing
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+cols  <-  c("If_Re_roof","day.diff","Phase")
+p8  <-  complete.data[,  cols]
+plot8  <-  aggregate(p8$day.diff,  by  =  list(p8$If_Re_roof,  p8$Phase),  mean)
+names(plot8)  <-  c("If_Re_roof",  "Phase",  "Avg.Days")
+
+plot8$If_Re_roof  <-  ifelse(plot8$If_Re_roof  ==  "1",  "With Re-Roof",  "Without Re-Roof")
+
+#plot
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2,  tickangle  =  0)
+a2  <-  list(title  =  "Days",  titlefont  =  f1)
+
+plot_ly(plot8,  x  =  Phase,  y  =  Avg.Days,  symbol  =  If_Re_roof 
+        , colors = "PuOr",  mode  =  "markers",  marker  =  list(size  =  15)) %>% layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1100
+,  height  =  500,  margin  =  m)
+```
+
+*******************
+
+# Average days taken per step for each phase conditoned on Home-Owner's Association (HOA)
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+cols  <-  c("If_HOA","day.diff","Phase")
+p9  <-  complete.data[,  cols]  ;  p9$If_HOA[p9$If_HOA  ==  "2"]  <-  "1"
+plot9  <-  aggregate(p9$day.diff,  by  =  list(p9$If_HOA,  p9$Phase),  mean)
+names(plot9)  <-  c("If_HOA",  "Phase",  "Avg.Days")
+plot9$If_HOA  <-  ifelse(plot9$If_HOA  ==  "1",  "With HOA",  "Without HOA")
+
+#plot
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2)
+a2  <-  list(title  =  "Days",  titlefont  =  f1)
+
+plot_ly(plot9,  x  =  Phase,  y  =  Avg.Days,  symbol  =  If_HOA,  colors  =  "PuOr"
+,  mode  =  "markers",  marker  =  list(size  =  15)) %>% layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1050
+,  height  =  500,  margin  =  m)
+```
+
+*******************
+# Average days taken per step for each phase conditioned on External Build Partners (BP)
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+cols  <-  c("If_build","day.diff","Phase")
+p10  <-  complete.data[,  cols]
+plot10  <-  aggregate(p10$day.diff,  by  =  list(p10$If_build,  p10$Phase),  mean)
+names(plot10)  <-  c("If_build",  "Phase",  "Avg.Days")
+plot10$If_build  <-  ifelse(plot10$If_build  ==  "1",  "With BP",  "without BP")
+
+#plot
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2)
+a2  <-  list(title  =  "Days",  titlefont  =  f1,  showticklabels  =  TRUE,
+      tickfont  =  f2)
+
+plot_ly(plot10,  x  =  Phase,  y  =  Avg.Days,  symbol  =  If_build,  colors  =  "PuOr"
+,  mode  =  "markers",  marker  =  list(size  =  15)) %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1050,  height  =  500,  margin  =  m)
+```
+
+*******************
+# Average days taken per step for each phase conditioned on Professional Engineer's (PE) Stamp Approval
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+cols  <-  c("If_PEStamp","day.diff","Phase")
+p11  <-  complete.data[,  cols]
+plot11  <-  aggregate(p11$day.diff,  by  =  list(p11$If_PEStamp,  p11$Phase),  mean)
+names(plot11)  <-  c("If_PEStamp",  "Phase",  "Avg.Days")
+plot11$If_PEStamp  <-  ifelse(plot11$If_PEStamp  ==  "1",  "With PE_Stamp",  "Without PE_Stamp")
+
+#plot
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2,  tickangle  =  0)
+a2  <-  list(title  =  "Days",  titlefont  =  f1,  showticklabels  =  TRUE,
+      tickfont  =  f2)
+
+plot_ly(plot11,  x  =  Phase,  y  =  Avg.Days,  symbol  =  If_PEStamp 
+, colors = "PuOr",  mode  =  "markers",  marker  =  list(size  =  15)) %>% layout(xaxis  =  a1
+,  yaxis  =  a2,  showlegend  =  TRUE) %>% layout(autosize  =  F
+,  width  =  1050,  height  =  500,  margin  =  m)
+```
+
+*******************
+# Average days taken per step for each phase conditioned on Main Panel Upgrade(MPU)  
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+cols  <-  c("if_MPU","day.diff","Phase")
+p12  <-  complete.data[,  cols]
+plot12  <-  aggregate(p12$day.diff,  by  =  list(p12$if_MPU,  p12$Phase),  mean)
+names(plot12)  <-  c("if_MPU",  "Phase",  "Avg.Days")
+plot12$if_MPU  <-  ifelse(plot12$if_MPU  ==  "1",  "With MPU",  "Without MPU")
+
+#plot
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2,  tickangle  =  0)
+a2  <-  list(title  =  "Days",  titlefont  =  f1,  showticklabels  =  TRUE,
+      tickfont  =  f2)
+
+plot_ly(plot12,  x  =  Phase,  y  =  Avg.Days,  symbol  =  if_MPU,  colors  =  "PuOr"
+        ,  mode  =  "markers",  marker  =  list(size  =  15)) %>% layout(xaxis  =  a1,  yaxis  =  a2
+,  showlegend  =  TRUE)  %>% layout(autosize  =  F,  width  =  1050,  height  =  500,  margin  =  m)
+```
+
+**************************************
+# Last Project Status on average days taken per step for each phase 
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+cols  <-  c("Status","day.diff","Phase")
+p13  <-  complete.data[,  cols]
+plot13  <-  aggregate(p13$day.diff,  by  =  list(p13$Status,  p13$Phase),  mean)
+names(plot13)  <-  c("Status",  "Phase",  "Avg.Days")
+
+#plot
+a1  <-  list(title  =  "Phase",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2)
+a2  <-  list(title  =  "Days",  titlefont  =  f1,  showticklabels  =  TRUE,
+      tickfont  =  f2)
+
+plot_ly(plot13,  x  =  Phase,  y  =  Avg.Days,  symbol  =  Status ,  colors  =  "PuOr"
+,  mode  =  "markers",  marker  =  list(size  =  15))  %>%  layout(xaxis  =  a1,  yaxis  =  a2
+,  showlegend  =  TRUE) %>% layout(autosize  =  F,  width  =  1050,  height  =  500,  margin  =  m)
+```
+
+**************************************
+# Average % of projects completed Vs number of days passed
+
+```{r,  echo  =  FALSE,  warning  =  NA}
+data2  <-  data.new  ;  rm(data.new)
+names(data2)  <-  c('Project','Task','Start','End','Phase','days')
+n  <-  sqldf("select Project, (max(End) - min(Start)) Days from data2 group by Project")
+names(n)  <-  c('Project','Days')
+
+n.1  <-  data.frame(table(n$Days))  #Creating a Frequency table
+n.1$prop  <-  cumsum(n.1$Freq)  *  100  /  sum(n.1$Freq)
+n.1$prop  <-  as.integer(n.1$prop)  ;  names(n.1)[1]  <-  "Days"  
+
+#plot
+a1  <-  list(title  =  "Days",  titlefont  =  f1,  showticklabels  =  TRUE
+             ,  tickfont  =  f2)
+a2  <-  list(title  =  "% Completed",  titlefont  =  f1,  showticklabels  =  TRUE,
+      tickfont  =  f2)
+
+plot_ly(data  =  n.1,  x  =  Days,  y  =  prop,  colors  =  "PuOr",  mode  =  "markers") %>%  layout(xaxis  =  a1,  yaxis  =  a2,  showlegend  =  FALSE) %>% layout(autosize  =  F,  width  =  700,  height  =  500,  margin  =  m)
+```
+
+**************************************
+
+```{r,  echo  =  FALSE,  eval  =  FALSE,  warning  =  NA}
+# Extent of Overlap in the dataset (Analysis in Code)
+m  <-  sqldf("select Project, Phase, (max(End) - min(Start)) Days from data2 group by Project, Phase")
+names(m)  <-  c('Project','Phase','Days')
+
+#Now rolling it up to Project level from Individual phases of projects
+m.agg  <-  aggregate(m$Days,  by  =  list(m$Project),  sum)  
+names(m.agg)  <-  c("Project","Days")
+
+#Combing the above 2 tables to get the overlap on Project level
+project.days  <-  merge(n,  m.agg,  by  =  'Project',  all  =  TRUE) 
+names(project.days)[2:3]  <-  c('Overall_days','Phases_days')
+#guaging extent of Overlap between phases 
+for  (i  in  1:length(project.days[,1]))  {
+  project.days$Ratio[i]  <-  project.days$Phases_days[i]/project.days$Overall_days[i]
+}
+
+#Printing extent of Overlap within phases
+cat("Extent of overlap within phases for completed projects on average has been",mean(project.days$Ratio))
+
+#Exploring why there was the Overlap
+m.1  <-  sqldf("select Project, Phase, min(Start) Start, max(End) End from data2  group by Project, Phase")
+names(m.1)  <-  c('Project','Phase','Start','End')
+
+#Going from long to short on the Dataframe
+data.wide  <-  reshape(m.1,  timevar  =  "Phase",  idvar  =  "Project"
+                       ,  direction  =  "wide")
+#Naming cols appropriately
+names(data.wide)[2:15]  <-  c('Initiate.S','Initiate.E','Audit.S','Audit.E'
+,'Approve.S','Approve.E','Design.S','Design.E','Pre_Instal.S','Pre_Instal.E'
+,'Install.S','Install.E','Complete.S','Complete.E')
+```
+
+
+
+```{r,  echo  =  FALSE,  results  =  'hide',  message  =  FALSE,  warning  =  FALSE}
+#unloading all the packages
+detach("package:sqldf",  unload  =  TRUE)
+detach("package:lubridate",  unload  =  TRUE)
+detach("package:bizdays",  unload  =  TRUE)
+#Removing all the objects too
+rm(list  =  ls())
+```
